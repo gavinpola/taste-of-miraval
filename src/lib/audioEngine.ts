@@ -16,6 +16,7 @@ export class AmbientAudioEngine {
   private activeNodes: (OscillatorNode | AudioBufferSourceNode)[] = [];
   private activeGains: GainNode[] = [];
   private isPlaying = false;
+  private targetVolume = 1;
 
   private getContext(): AudioContext {
     if (!this.ctx) {
@@ -33,6 +34,14 @@ export class AmbientAudioEngine {
   private getMaster(): GainNode {
     this.getContext();
     return this.masterGain!;
+  }
+
+  // Set the target master volume (0-1+). Used to control per-element intensity.
+  setMasterVolume(level: number): void {
+    this.targetVolume = level;
+    if (this.masterGain && this.ctx && this.isPlaying) {
+      this.masterGain.gain.linearRampToValueAtTime(level, this.ctx.currentTime + 2);
+    }
   }
 
   // Create a binaural beat (two slightly detuned tones in L/R ears)
@@ -175,10 +184,43 @@ export class AmbientAudioEngine {
     this.activeGains.push(g1, g2);
   }
 
+  // Create rhythmic pulse (simulates drum/heartbeat via gain modulation)
+  private createPulse(frequency: number, pulseRate: number, depth: number): void {
+    const ctx = this.getContext();
+    const master = this.getMaster();
+
+    // Sub-bass hit
+    const osc = ctx.createOscillator();
+    osc.frequency.value = frequency;
+    osc.type = "sine";
+
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = 0;
+
+    // LFO modulates the gain to create rhythmic pulses
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = pulseRate; // pulses per second
+    lfo.type = "sine";
+
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = depth;
+
+    // Route LFO into the gain parameter
+    lfo.connect(lfoGain).connect(gainNode.gain);
+    osc.connect(gainNode).connect(master);
+
+    osc.start();
+    lfo.start();
+
+    this.activeNodes.push(osc, lfo);
+    this.activeGains.push(gainNode, lfoGain);
+  }
+
   // Preset: Meditation (for HMR, general meditation)
   playMeditation(): void {
     this.stop();
-    this.createBinaural(174, 4, 0.06); // Theta binaural for deep relaxation
+    this.targetVolume = 1;
+    this.createBinaural(174, 4, 0.06);
     this.createDrones([
       { frequency: 87, type: "sine", gain: 0.04 },
       { frequency: 130.81, type: "sine", gain: 0.03, detune: 3 },
@@ -187,73 +229,97 @@ export class AmbientAudioEngine {
     this.fadeIn(3);
   }
 
-  // Preset: Earth element
+  // Preset: Earth element — deep, heavy, still
   playEarth(): void {
     this.stop();
-    this.createBinaural(108, 3, 0.05); // Deep grounding
+    this.targetVolume = 0.65;
+    this.createBinaural(108, 3, 0.06);
     this.createDrones([
+      { frequency: 36, type: "sine", gain: 0.08 },    // deep sub-bass
       { frequency: 54, type: "sine", gain: 0.06 },
       { frequency: 108, type: "triangle", gain: 0.03 },
-      { frequency: 162, type: "sine", gain: 0.02 },
+      { frequency: 162, type: "sine", gain: 0.015 },
     ]);
-    this.createNoise("wind", 0.008);
-    this.fadeIn(4);
+    this.createNoise("wind", 0.006);
+    this.fadeIn(5, this.targetVolume);
   }
 
-  // Preset: Water element
+  // Preset: Water element — flowing, mid-range, gentle pulsing
   playWater(): void {
     this.stop();
-    this.createBinaural(216, 6, 0.04);
+    this.targetVolume = 0.75;
+    this.createBinaural(216, 6, 0.045);
     this.createDrones([
+      { frequency: 130.81, type: "sine", gain: 0.035 },
       { frequency: 174, type: "sine", gain: 0.04 },
       { frequency: 261.63, type: "sine", gain: 0.025, detune: 5 },
     ]);
-    this.createNoise("ocean", 0.03);
-    this.createNoise("rain", 0.01);
-    this.fadeIn(4);
+    this.createNoise("ocean", 0.04);
+    this.createNoise("rain", 0.015);
+    // Gentle sub-pulse like waves lapping
+    this.createPulse(65, 0.15, 0.02);
+    this.fadeIn(4, this.targetVolume);
   }
 
-  // Preset: Fire element
-  playFire(): void {
+  // Preset: Fire element — LOUD, intense, with rhythmic drums
+  playFireIntense(): void {
     this.stop();
-    this.createBinaural(288, 8, 0.04);
+    this.targetVolume = 1.2;
+    this.createBinaural(288, 10, 0.05);
     this.createDrones([
-      { frequency: 220, type: "sawtooth", gain: 0.015 },
-      { frequency: 329.63, type: "sine", gain: 0.03 },
-      { frequency: 440, type: "sine", gain: 0.02 },
+      { frequency: 110, type: "sawtooth", gain: 0.025 },   // gritty low
+      { frequency: 220, type: "sawtooth", gain: 0.02 },
+      { frequency: 329.63, type: "sine", gain: 0.04 },
+      { frequency: 440, type: "sine", gain: 0.025 },
+      { frequency: 523.25, type: "sine", gain: 0.015 },     // high tension
     ]);
-    this.createNoise("fire", 0.025);
-    this.fadeIn(4);
+    this.createNoise("fire", 0.05);   // loud crackle
+    // Rhythmic pulse — heartbeat/drum at ~1.8Hz (108 BPM)
+    this.createPulse(55, 1.8, 0.06);
+    // Second faster pulse for urgency
+    this.createPulse(80, 3.6, 0.03);
+    this.fadeIn(3, this.targetVolume);
   }
 
-  // Preset: Air element
+  // Original fire preset (kept for backward compat)
+  playFire(): void {
+    this.playFireIntense();
+  }
+
+  // Preset: Air element — light, ethereal, relief after fire
   playAir(): void {
     this.stop();
-    this.createBinaural(396, 10, 0.03);
+    this.targetVolume = 0.5;
+    this.createBinaural(396, 10, 0.025);
     this.createDrones([
-      { frequency: 396, type: "sine", gain: 0.025 },
-      { frequency: 528, type: "sine", gain: 0.02, detune: 7 },
+      { frequency: 396, type: "sine", gain: 0.02 },
+      { frequency: 528, type: "sine", gain: 0.018, detune: 7 },
+      { frequency: 639, type: "sine", gain: 0.012 },
     ]);
-    this.createNoise("wind", 0.04);
-    this.fadeIn(4);
+    this.createNoise("wind", 0.06);  // prominent wind
+    this.fadeIn(5, this.targetVolume);
   }
 
-  // Preset: Spirit/Ether element
+  // Preset: Spirit/Ether element — warm, wide, singing bowls
   playSpirit(): void {
     this.stop();
-    this.createBinaural(432, 7.83, 0.04); // Schumann resonance beat
-    this.createBowl(432, 0.03);
-    this.createBowl(528, 0.02);
+    this.targetVolume = 0.7;
+    this.createBinaural(432, 7.83, 0.04);
+    this.createBowl(256, 0.025);
+    this.createBowl(432, 0.035);
+    this.createBowl(528, 0.025);
     this.createDrones([
-      { frequency: 216, type: "sine", gain: 0.025 },
+      { frequency: 216, type: "sine", gain: 0.03 },
+      { frequency: 324, type: "sine", gain: 0.015, detune: 3 },
     ]);
     this.createNoise("wind", 0.008);
-    this.fadeIn(4);
+    this.fadeIn(5, this.targetVolume);
   }
 
   // Preset: Qigong practice
   playQigong(): void {
     this.stop();
+    this.targetVolume = 1;
     this.createBinaural(256, 5, 0.04);
     this.createDrones([
       { frequency: 128, type: "sine", gain: 0.03 },
@@ -267,7 +333,8 @@ export class AmbientAudioEngine {
   // Preset: Resolution / release (warm, major key)
   playResolution(): void {
     this.stop();
-    this.createBinaural(261.63, 4, 0.04); // C4 with theta
+    this.targetVolume = 1;
+    this.createBinaural(261.63, 4, 0.04);
     this.createDrones([
       { frequency: 261.63, type: "sine", gain: 0.035 },
       { frequency: 329.63, type: "sine", gain: 0.025 },
@@ -278,11 +345,12 @@ export class AmbientAudioEngine {
     this.fadeIn(4);
   }
 
-  fadeIn(duration: number = 3): void {
+  fadeIn(duration: number = 3, targetLevel?: number): void {
     const master = this.getMaster();
     const ctx = this.getContext();
+    const target = targetLevel ?? this.targetVolume;
     master.gain.setValueAtTime(0, ctx.currentTime);
-    master.gain.linearRampToValueAtTime(1, ctx.currentTime + duration);
+    master.gain.linearRampToValueAtTime(target, ctx.currentTime + duration);
     this.isPlaying = true;
   }
 
@@ -291,6 +359,20 @@ export class AmbientAudioEngine {
     const ctx = this.ctx;
     this.masterGain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
     setTimeout(() => this.stop(), duration * 1000 + 100);
+  }
+
+  // Cross-fade: fade out current audio over `outDur`, then call callback
+  crossFadeTo(outDuration: number, startNext: () => void): void {
+    if (!this.ctx || !this.masterGain || !this.isPlaying) {
+      startNext();
+      return;
+    }
+    const ctx = this.ctx;
+    this.masterGain.gain.linearRampToValueAtTime(0, ctx.currentTime + outDuration);
+    setTimeout(() => {
+      this.stop();
+      startNext();
+    }, outDuration * 1000);
   }
 
   stop(): void {
@@ -328,4 +410,3 @@ export function getAudioEngine(): AmbientAudioEngine {
   }
   return engineInstance;
 }
-
