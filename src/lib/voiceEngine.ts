@@ -191,11 +191,6 @@ export class VoiceGuidanceEngine {
         return;
       }
 
-      // Cancel any lingering speech to prevent overlap
-      if (speechSynthesis.speaking) {
-        speechSynthesis.cancel();
-      }
-
       const utterance = new SpeechSynthesisUtterance(item.text);
       utterance.rate = item.rate ?? this.rate;
       utterance.pitch = item.pitch ?? this.pitch;
@@ -211,7 +206,11 @@ export class VoiceGuidanceEngine {
         this.currentUtterance = null;
         resolve();
       };
-      utterance.onerror = () => {
+      utterance.onerror = (e) => {
+        // "interrupted" is expected when cancel() is called — don't log
+        if (e.error !== "interrupted") {
+          console.warn("Speech error:", e.error);
+        }
         this.currentUtterance = null;
         resolve();
       };
