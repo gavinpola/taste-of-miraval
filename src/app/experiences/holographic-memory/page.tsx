@@ -16,6 +16,7 @@ type Stage =
   | "color"
   | "metaphor"
   | "describe"
+  | "describeMore"
   | "age"
   | "scene"
   | "narrative"
@@ -32,6 +33,7 @@ const STAGE_ORDER: Stage[] = [
   "color",
   "metaphor",
   "describe",
+  "describeMore",
   "age",
   "scene",
   "narrative",
@@ -49,6 +51,7 @@ const STAGE_LABELS: Record<Stage, string> = {
   color: "Color",
   metaphor: "Shape",
   describe: "Describe",
+  describeMore: "Describe",
   age: "Memory",
   scene: "Scene",
   narrative: "Story",
@@ -120,6 +123,7 @@ export default function HolographicMemoryPage() {
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [healingColorHex, setHealingColorHex] = useState<string | null>(null);
   const [releaseProgress, setReleaseProgress] = useState(0);
+  const [isResponding, setIsResponding] = useState(false);
 
   // User responses stored for active listening context
   const [, setResponses] = useState<Record<string, string>>({});
@@ -132,6 +136,12 @@ export default function HolographicMemoryPage() {
   // Helper to store a response
   const saveResponse = useCallback((key: string, value: string) => {
     setResponses((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  // Helper: fade out current content, then change stage
+  const goToStage = useCallback((nextStage: Stage) => {
+    setIsResponding(false);
+    setStage(nextStage);
   }, []);
 
   // ── Grounding voice sequence ─────────────────────────────────────
@@ -172,11 +182,11 @@ export default function HolographicMemoryPage() {
         {
           text: "If there is an area that calls your attention... a place that feels tight, or heavy, or tender... that is where we will begin.",
           pauseAfter: 2000,
-          onEnd: () => setStage("bodyAwareness"),
+          onEnd: () => goToStage("bodyAwareness"),
         }
       );
     }, 1500);
-  }, []);
+  }, [goToStage]);
 
   // ── Body awareness → user taps body silhouette ───────────────────
   const handleBodySelect = useCallback(
@@ -185,26 +195,26 @@ export default function HolographicMemoryPage() {
       const x = ((e.clientX - rect.left) / rect.width) * 100;
       const y = ((e.clientY - rect.top) / rect.height) * 100;
       setBodyPoint({ x, y });
+      setIsResponding(true);
       const area = getBodyAreaLabel(y);
       setBodyArea(area);
       saveResponse("bodyArea", area);
 
       setTimeout(() => {
-        voiceRef.current.enqueue(
-          {
-            text: `I see... your ${area}. Let's stay with that.`,
-            pauseAfter: 2000,
-            onEnd: () => setStage("localize"),
-          }
-        );
+        voiceRef.current.enqueue({
+          text: `I see... your ${area}. Let's stay with that.`,
+          pauseAfter: 2000,
+          onEnd: () => goToStage("localize"),
+        });
       }, 600);
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
   // ── Localize: inside / outside / both ────────────────────────────
   const handleLocalize = useCallback(
     (choice: string) => {
+      setIsResponding(true);
       saveResponse("localize", choice);
       voiceRef.current.enqueue({
         text: `${choice === "both" ? "Both inside and outside" : choice === "inside" ? "On the inside" : "On the outside"}... thank you for noticing that.`,
@@ -213,18 +223,19 @@ export default function HolographicMemoryPage() {
           voiceRef.current.enqueue({
             text: "Now... what color do you associate with this feeling? There is no right answer. Trust whatever comes to you first.",
             pauseAfter: 1000,
-            onEnd: () => setStage("color"),
+            onEnd: () => goToStage("color"),
           });
         },
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
   // ── Color selection ──────────────────────────────────────────────
   const handleColorSelect = useCallback(
     (color: string) => {
       setSelectedColor(color);
+      setIsResponding(true);
       const colorName = getColorName(color);
       saveResponse("color", colorName);
 
@@ -236,18 +247,19 @@ export default function HolographicMemoryPage() {
             voiceRef.current.enqueue({
               text: "Does this feeling have a shape or a size? Take a moment... and describe what you see.",
               pauseAfter: 1000,
-              onEnd: () => setStage("metaphor"),
+              onEnd: () => goToStage("metaphor"),
             });
           },
         });
       }, 600);
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
-  // ── Metaphor (shape/size + weight/temp/texture) ──────────────────
+  // ── Metaphor (shape/size) ────────────────────────────────────────
   const handleMetaphorResponse = useCallback(
     (text: string) => {
+      setIsResponding(true);
       const phrase = extractKeyPhrase(text);
       saveResponse("metaphor", phrase);
       voiceRef.current.enqueue({
@@ -257,31 +269,59 @@ export default function HolographicMemoryPage() {
           voiceRef.current.enqueue({
             text: "Does it have a weight... a temperature... or a texture? What does it feel like?",
             pauseAfter: 1000,
-            onEnd: () => setStage("describe"),
+            onEnd: () => goToStage("describe"),
           });
         },
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
-  // ── Describe (anything else) ─────────────────────────────────────
+  // ── Describe (weight/temp/texture) ───────────────────────────────
   const handleDescribeResponse = useCallback(
     (text: string) => {
+      setIsResponding(true);
       const phrase = extractKeyPhrase(text);
       saveResponse("describe", phrase);
       voiceRef.current.enqueue({
-        text: `${phrase}... I hear you. Is there anything else about it you want to describe? If not... just say 'no' and we will continue.`,
-        pauseAfter: 1000,
-        onEnd: () => setStage("age"),
+        text: `${phrase}... I hear you. Is there anything else about it you want to describe?`,
+        pauseAfter: 1500,
+        onEnd: () => goToStage("describeMore"),
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
+  );
+
+  // ── Describe More (user says "no" or adds more) ──────────────────
+  const handleDescribeMoreResponse = useCallback(
+    (text: string) => {
+      setIsResponding(true);
+      const lower = text.toLowerCase().trim();
+      const isNo = /^(no|nope|nothing|nah|not really|that's it|thats it|no thank|i'm good|im good|done|n\/a)/.test(lower);
+
+      if (isNo) {
+        voiceRef.current.enqueue({
+          text: "Okay... thank you. Let's go a little deeper.",
+          pauseAfter: 2000,
+          onEnd: () => goToStage("age"),
+        });
+      } else {
+        const phrase = extractKeyPhrase(text);
+        saveResponse("describeMore", phrase);
+        voiceRef.current.enqueue({
+          text: `${phrase}... thank you for sharing that. Let's continue.`,
+          pauseAfter: 2000,
+          onEnd: () => goToStage("age"),
+        });
+      }
+    },
+    [saveResponse, goToStage]
   );
 
   // ── Age / first memory ───────────────────────────────────────────
   const handleAgeResponse = useCallback(
     (text: string) => {
+      setIsResponding(true);
       const phrase = extractKeyPhrase(text);
       saveResponse("age", phrase);
 
@@ -296,17 +336,18 @@ export default function HolographicMemoryPage() {
           voiceRef.current.enqueue({
             text: "What else do you see about this? Is there a place you are... when you first feel this?",
             pauseAfter: 1000,
-            onEnd: () => setStage("scene"),
+            onEnd: () => goToStage("scene"),
           });
         },
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
   // ── Scene ────────────────────────────────────────────────────────
   const handleSceneResponse = useCallback(
     (text: string) => {
+      setIsResponding(true);
       const phrase = extractKeyPhrase(text);
       saveResponse("scene", phrase);
       voiceRef.current.enqueue({
@@ -316,17 +357,18 @@ export default function HolographicMemoryPage() {
           voiceRef.current.enqueue({
             text: "Then what happens?... What happens next?",
             pauseAfter: 1000,
-            onEnd: () => setStage("narrative"),
+            onEnd: () => goToStage("narrative"),
           });
         },
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
   // ── Narrative ────────────────────────────────────────────────────
   const handleNarrativeResponse = useCallback(
     (text: string) => {
+      setIsResponding(true);
       const phrase = extractKeyPhrase(text);
       saveResponse("narrative", phrase);
       voiceRef.current.enqueue({
@@ -336,17 +378,18 @@ export default function HolographicMemoryPage() {
           voiceRef.current.enqueue({
             text: "Now... if the adult you could go back... and change this scene... what would you really like to see happen? Take the time you need.",
             pauseAfter: 1500,
-            onEnd: () => setStage("reframe"),
+            onEnd: () => goToStage("reframe"),
           });
         },
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
   // ── Reframe ──────────────────────────────────────────────────────
   const handleReframeResponse = useCallback(
     (text: string) => {
+      setIsResponding(true);
       const phrase = extractKeyPhrase(text);
       saveResponse("reframe", phrase);
       voiceRef.current.enqueue({
@@ -356,18 +399,19 @@ export default function HolographicMemoryPage() {
           voiceRef.current.enqueue({
             text: "Now... what colors would you like to frame this new scene with? Choose a healing color.",
             pauseAfter: 1000,
-            onEnd: () => setStage("healingColor"),
+            onEnd: () => goToStage("healingColor"),
           });
         },
       });
     },
-    [saveResponse]
+    [saveResponse, goToStage]
   );
 
   // ── Healing color selection ──────────────────────────────────────
   const handleHealingColorSelect = useCallback(
     (color: string) => {
       setHealingColorHex(color);
+      setIsResponding(true);
       const colorName = getColorName(color);
       saveResponse("healingColor", colorName);
 
@@ -389,13 +433,13 @@ export default function HolographicMemoryPage() {
           },
           {
             text: "Let it pour through you... like warm light... dissolving anything that no longer serves you.",
-            pauseAfter: 5000,
-            onEnd: () => setStage("integration"),
+            pauseAfter: 3000,
+            onEnd: () => goToStage("integration"),
           }
         );
       }, 600);
     },
-    [bodyArea, saveResponse]
+    [bodyArea, saveResponse, goToStage]
   );
 
   // ── Integration particle effect ──────────────────────────────────
@@ -488,18 +532,18 @@ export default function HolographicMemoryPage() {
       }
     };
 
-    // Voice: "How do you feel now?"
+    // Voice: "How do you feel now?" — shortly after particles start
     const voiceTimer = setTimeout(() => {
       voiceRef.current.enqueue({
         text: "How do you feel now?",
-        pauseAfter: 2000,
+        pauseAfter: 3000,
       });
-    }, 8000);
+    }, 4000);
 
-    // Auto-advance to return after the animation
+    // Auto-advance to return — tighter timing
     const endTimer = setTimeout(() => {
-      setStage("returnHome");
-    }, 25000);
+      goToStage("returnHome");
+    }, 12000);
 
     animate();
     return () => {
@@ -507,7 +551,7 @@ export default function HolographicMemoryPage() {
       clearTimeout(voiceTimer);
       clearTimeout(endTimer);
     };
-  }, [stage, selectedColor, healingColorHex, bodyPoint]);
+  }, [stage, selectedColor, healingColorHex, bodyPoint, goToStage]);
 
   // ── Return / grounding voice ─────────────────────────────────────
   useEffect(() => {
@@ -552,6 +596,11 @@ export default function HolographicMemoryPage() {
     describe: () =>
       voiceRef.current.enqueue({
         text: "Take your time... does it have a weight... a temperature... or a texture?",
+        pauseAfter: 1000,
+      }),
+    describeMore: () =>
+      voiceRef.current.enqueue({
+        text: "Is there anything else about it you want to describe?... If not... just say no and we will continue.",
         pauseAfter: 1000,
       }),
     age: () =>
@@ -605,7 +654,7 @@ export default function HolographicMemoryPage() {
       const pct = Math.max(0, 100 - releaseProgress);
       return `color-mix(in srgb, ${sc} ${pct}%, ${hc})`;
     }
-    if (selectedColor && ["color", "metaphor", "describe", "age", "scene", "narrative", "reframe", "healingColor"].includes(stage)) {
+    if (selectedColor && ["color", "metaphor", "describe", "describeMore", "age", "scene", "narrative", "reframe", "healingColor"].includes(stage)) {
       return `color-mix(in srgb, ${selectedColor} 20%, #1A1412)`;
     }
     return "#1A1412";
@@ -749,7 +798,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="bodyAwareness"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -814,7 +863,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="localize"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -843,7 +892,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="color"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -906,7 +955,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="metaphor"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -943,7 +992,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="describe"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -965,12 +1014,39 @@ export default function HolographicMemoryPage() {
           </motion.div>
         )}
 
+        {/* ══════ DESCRIBE MORE ═════════════════════════════════ */}
+        {stage === "describeMore" && (
+          <motion.div
+            key="describeMore"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1.5 }}
+            className="min-h-screen flex items-center justify-center px-6"
+          >
+            <div className="text-center max-w-xl w-full">
+              <p className="text-cream/70 font-heading text-2xl font-light mb-2">
+                Is there anything else about it?
+              </p>
+              <p className="text-cream/40 text-sm mb-4">
+                If not, just say &ldquo;no&rdquo; and we will continue
+              </p>
+              <ResponseInput
+                onSubmit={handleDescribeMoreResponse}
+                placeholder="Describe more, or say 'no'..."
+                onSilence={silenceHandlers.describeMore}
+                active={stage === "describeMore"}
+              />
+            </div>
+          </motion.div>
+        )}
+
         {/* ══════ AGE / FIRST MEMORY ═══════════════════════════ */}
         {stage === "age" && (
           <motion.div
             key="age"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -997,7 +1073,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="scene"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -1024,7 +1100,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="narrative"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -1051,7 +1127,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="reframe"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"
@@ -1078,7 +1154,7 @@ export default function HolographicMemoryPage() {
           <motion.div
             key="healingColor"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isResponding ? 0 : 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 1.5 }}
             className="min-h-screen flex items-center justify-center px-6"

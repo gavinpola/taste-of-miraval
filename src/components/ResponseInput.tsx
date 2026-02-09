@@ -46,7 +46,7 @@ export default function ResponseInput({
   onSubmit,
   placeholder = "Type your response here...",
   showTextInput = true,
-  silenceTimeout = 50000,
+  silenceTimeout = 12000,
   onSilence,
   active = true,
 }: ResponseInputProps) {
